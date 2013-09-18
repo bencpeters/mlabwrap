@@ -50,7 +50,7 @@ import sys
 import re
 from tempfile import mktemp
 if sys.version_info < (2,2):
-    print >> sys.stderr, "You need at least python 2.2"
+    print("You need at least python 2.2", file=sys.stderr)
     sys.exit(1)
 try: # python >= 2.3 has better mktemp
     from tempfile import mkstemp as _mkstemp
@@ -70,12 +70,12 @@ if PYTHON_INCLUDE_DIR is None and not USE_NUMERIC:
         import numpy
         PYTHON_INCLUDE_DIR = numpy.get_include()
     except ImportError:
-        print >> sys.stderr, "Warning: numpy not found. Still using Numeric?"
+        print("Warning: numpy not found. Still using Numeric?", file=sys.stderr)
         try:
             import Numeric
             if USE_NUMERIC is None: USE_NUMERIC=True
         except ImportError:
-            print >> sys.stderr, "CANNOT FIND EITHER NUMPY *OR* NUMERIC"
+            print("CANNOT FIND EITHER NUMPY *OR* NUMERIC", file=sys.stderr)
 
 def matlab_params(cmd, is_windows, extra_args):
     param_fname = mktemp()
@@ -102,11 +102,11 @@ PLEASE MAKE SURE matlab IS IN YOUR PATH!
         if fh: fh.close()
         try:
             os.remove(param_fname)
-        except OSError, msg: # FIXME
-            print >> sys.stderr, """
+        except OSError as msg: # FIXME
+            print("""
 WINDOWS SPECIFIC ISSUE? Unable to remove %s; please delete it manually
 %s
-""" % (param_fname, msg)
+""" % (param_fname, msg), file=sys.stderr)
 
 # windows
 WINDOWS=sys.platform.startswith('win')
@@ -139,7 +139,7 @@ if WINDOWS:
     CPP_LIBRARIES = [] #XXX shouldn't need CPP libs for windoze
 # unices
 else:
-    EXTENSION_NAME = 'mlabrawmodule'
+    EXTENSION_NAME = 'mlabraw'
     if not MATLAB_LIBRARIES:
         if MATLAB_VERSION >= 6.5:
             MATLAB_LIBRARIES = 'eng mx mat ut'.split()
@@ -161,7 +161,7 @@ if WINDOWS:
         MATLAB_LIBRARY_DIRS += [VC_DIR + "/lib"]
         MATLAB_INCLUDE_DIRS += [VC_DIR + "/include", VC_DIR + "/PlatformSDK/include"]
     else:
-        print "Not using Visual C++; fiddling paths for Borland C++ compatibility"
+        print("Not using Visual C++; fiddling paths for Borland C++ compatibility")
         MATLAB_LIBRARY_DIRS = [mld.replace('/','\\') for mld in  MATLAB_LIBRARY_DIRS]
 DEFINE_MACROS=[]
 if MATLAB_VERSION >= 6.5:
