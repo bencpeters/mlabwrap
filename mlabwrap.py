@@ -318,7 +318,7 @@ class MlabObjectProxy(object):
     def __setattr__(self, attr, value):
         self._set_part("%s.%s" % (self._name, attr), value)
     # FIXME still have to think properly about how to best translate Matlab semantics here...
-    def __nonzero__(self):
+    def __bool__(self):
         raise TypeError("%s does not yet implement truth testing" % type(self).__name__)
     def __len__(self):
         raise TypeError("%s does not yet implement __len__" % type(self).__name__)
@@ -457,8 +457,8 @@ class MlabWrap(object):
                    [all(size(%(vn)s) == 0), \
                     min(size(%(vn)s)) == 1 & ndims(%(vn)s) == 2, \
                     max(size(%(vn)s))];" % {'vn':varname})
-        is_empty, is_rank1, cell_len = map(int,
-                                           self._get("TMP_SIZE_INFO__", remove=True).flat)
+        is_empty, is_rank1, cell_len = list(map(int,
+                                           self._get("TMP_SIZE_INFO__", remove=True).flat))
         if is_empty:
             return []
         elif is_rank1:
@@ -548,7 +548,7 @@ class MlabWrap(object):
 
             if nout == 1: res = res[0]
             else:         res = tuple(res)
-            if kwargs.has_key('cast'):
+            if 'cast' in kwargs:
                 if nout == 0: raise TypeError("Can't cast: 0 nout")
                 return kwargs['cast'](res)
             else:
@@ -616,14 +616,14 @@ class MlabWrap(object):
         object on-the-fly."""
         if re.search(r'\W', attr): # work around ipython <= 0.7.3 bug
             raise ValueError("Attributes don't look like this: %r" % attr)
-        if attr.startswith('__'): raise AttributeError, attr
+        if attr.startswith('__'): raise AttributeError(attr)
         assert not attr.startswith('_') # XXX
         # print_ -> print
         if attr[-1] == "_": name = attr[:-1]
         else             : name = attr
         try:
             nout = self._do("nargout('%s')" % name)
-        except mlabraw.error, msg:
+        except mlabraw.error as msg:
             typ = numpy.ravel(self._do("exist('%s')" % name))[0]
             if   typ == 0: # doesn't exist
                 raise AttributeError("No such matlab object: %s" % name)

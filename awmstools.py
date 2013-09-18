@@ -35,7 +35,7 @@
 
 
 """
-from __future__ import division
+
 __docformat__ = "restructuredtext en"
 __revision__ = "$Id: awmstools.py,v 1.29 2009-03-24 02:09:50 aschmolc Exp $"
 __version__  = "0.9"
@@ -45,7 +45,9 @@ __test__ = {} # this is for doctest
 import bisect
 import codecs
 import copy
-import cPickle
+import pickle
+import collections
+from functools import reduce
 try: from functools import partial # python < 2.5 compatibility
 except ImportError: partial = lambda f,*args,**kwargs: lambda *a,**k: f(args+a,update(kwargs,k))
 from itertools import *
@@ -54,15 +56,14 @@ import itertools
 import math
 import operator
 import os
-import popen2
+from subprocess import Popen
 import getpass
 import re
-import sets
 import sys
 import tempfile
 import time
 import types
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 try: from threading import Lock
 except ImportError: Lock = lambda: Null
 
@@ -81,14 +82,14 @@ except NameError:
     __unique = _uniqueClass()
 
 
-if sys.maxint > 1e6*60*60*24*365*100: # see below
+if sys.maxsize > 1e6*60*60*24*365*100: # see below
     # XXX this relies on the GIL & itertools for threadsafety
     # but since itertools.count can only count to sys.maxint...
     def Counter(start=0):
         """A threadsafe counter that let's you keep counting
         for at least 100 years at a rate of 1MHz (if `start`= 0).
         """
-        return itertools.count(start).next
+        return itertools.count(start).__next__
 else:
     # ... we also need this more generic version
     class Counter(object):
@@ -147,8 +148,8 @@ def rexGroups(rex):
     ('name', 'surname')
 
     """
-    if isinstance(rex,basestring): rex = re.compile(rex)
-    return zip(*sorted([(n,g) for (g,n) in rex.groupindex.items()]))[1]
+    if isinstance(rex,str): rex = re.compile(rex)
+    return zip(*sorted([(n,g) for (g,n) in list(rex.groupindex.items())]))[1]
 
 
 class IndexMaker(object):
@@ -171,7 +172,7 @@ indexme = IndexMaker()
 
 # A shortcut for 'infinite' integer e.g. for slicing: ``seq[4:INFI]`` as
 # ``seq[4:len(seq)]`` is messy and only works if `seq` isn't an expression
-INFI = sys.maxint
+INFI = sys.maxsize
 # real infinity
 INF = 1e999999
 
@@ -229,7 +230,7 @@ False
     def __call__(self, *args, **kwargs): return Null
 ##    def __getstate__(self, *args):       return Null
     def __getinitargs__(self):
-        print "__getinitargs__"
+        print("__getinitargs__")
         return ('foobar',)
     def __getattr__(self, attr):         return Null
     def __getitem__(self, item):         return Null
@@ -312,7 +313,7 @@ def _normalizeToFile(maybeFile, mode, expand):
         return os.fdopen(maybeFile, mode)
     elif isString(maybeFile):
         if maybeFile.startswith('http://'): #XXX experimental
-            return urllib2.urlopen(maybeFile)
+            return urllib.request.urlopen(maybeFile)
         else:
             if expand:
                 maybeFile = os.path.expandvars(os.path.expanduser(maybeFile))
@@ -394,7 +395,7 @@ def readProcess(cmd, *args):
     """
     BUFSIZE=1024
     import select
-    popen = popen2.Popen3((cmd,) + args, capturestderr=True)
+    popen = Popen((cmd,) + args, capturestderr=True)
     which = {id(popen.fromchild): [],
              id(popen.childerr):  []}
     select = Result(select.select)
@@ -456,7 +457,7 @@ def isSeq(obj):
     r"""Returns true if obj is a sequence (which does purposefully **not**
     include strings, because these are pseudo-sequences that mess
     up recursion.)"""
-    return operator.isSequenceType(obj) and not isinstance(obj, (str, unicode))
+    return isinstance(obj, collections.Sequence) and not isinstance(obj, str)
 
 
 
@@ -495,7 +496,10 @@ def bipart(func, seq):
 def unzip(seq):
     r"""Perform the reverse operation to the builtin `zip` function."""
     # XXX should special case for more efficient handling
-    return zip(*seq)
+    return list(zip(*seq))
+
+def cmp(a, b):
+    return (a > b) - (a < b)
 
 def binarySearchPos(seq, item, cmpfunc=cmp):
     r"""Return the position of `item` in ordered sequence `seq`, using comparison
@@ -686,9 +690,9 @@ def weave(*iterables):
     >>> list(weave(('there','no', 'censorship'), iter(('is','psu'))))
     ['there', 'is', 'no', 'psu', 'censorship']
     """
-    iterables = map(iter, iterables)
+    iterables = list(map(iter, iterables))
     while True:
-        for it in iterables: yield it.next()
+        for it in iterables: yield next(it)
 
 def atIndices(indexable, indices, default=__unique):
     r"""Return a list of items in `indexable` at positions `indices`.
@@ -776,9 +780,9 @@ def group(iterable, n=2, pad=__unique):
     assert n>0    # ensure it doesn't loop forever
     if pad is not __unique: it = chain(iterable, (pad,)*(n-1))
     else:                   it = iter(iterable)
-    perTuple = xrange(n)
+    perTuple = list(range(n))
     while True:
-        yield tuple([it.next() for i in perTuple])
+        yield tuple([next(it) for i in perTuple])
 
 def iterate(f, n=None, last=__unique):
     """
@@ -789,7 +793,7 @@ def iterate(f, n=None, last=__unique):
     """
     if n is not None:
         def funciter(start):
-            for i in xrange(n): yield start; start = f(start)
+            for i in range(n): yield start; start = f(start)
     else:
         def funciter(start):
             while True:
@@ -822,7 +826,7 @@ def stretch(iterable, n=2):
     >>> list(stretch(range(3), 2))
     [0, 0, 1, 1, 2, 2]
     """
-    times = range(n)
+    times = list(range(n))
     for item in iterable:
         for i in times: yield item
 
@@ -845,7 +849,7 @@ def splitAt(iterable, indices):
     for to in indices:
         try:
             res = []
-            for i in range(now, to): res.append(iterable.next())
+            for i in range(now, to): res.append(next(iterable))
         except StopIteration: yield res; return
         yield res
         now = to
@@ -896,7 +900,7 @@ def invertDict(d, allowManyToOne=False):
     >>> invertDict({1: 2, 3: 2}, allowManyToOne=True).keys()
     [2]
     """
-    res = dict(izip(d.itervalues(), d.iterkeys()))
+    res = dict(list(zip(iter(list(d.values())), iter(list(d.keys())))))
     if not allowManyToOne and len(res) != len(d):
         raise ValueError("d can't be inverted!")
     return res
@@ -1029,7 +1033,7 @@ def findIf(predicate, iterable):
     >>> findIf(lambda x: x>40, [10,20,30,40])
     False
     """
-    try: return ifilter(predicate, iterable).next()
+    try: return next(filter(predicate, iterable))
     except StopIteration: return False
 
 
@@ -1046,8 +1050,8 @@ def some(predicate, *seqs):
     False
     """
     try:
-        if len(seqs) == 1: return ifilter(bool,imap(predicate, seqs[0])).next()
-        else:             return ifilter(bool,starmap(predicate, izip(*seqs))).next()
+        if len(seqs) == 1: return next(filter(bool,list(map(predicate, seqs[0]))))
+        else:             return next(filter(bool,starmap(predicate, list(zip(*seqs)))))
     except StopIteration: return False
 
 def every(predicate, *iterables):
@@ -1067,8 +1071,8 @@ def every(predicate, *iterables):
     False
     """
     try:
-        if len(iterables) == 1: ifilterfalse(predicate, iterables[0]).next()
-        else:                  ifilterfalse(bool, starmap(predicate, izip(*iterables))).next()
+        if len(iterables) == 1: next(filterfalse(predicate, iterables[0]))
+        else:                  next(filterfalse(bool, starmap(predicate, list(zip(*iterables)))))
     except StopIteration: return True
     else: return False
 
@@ -1091,7 +1095,7 @@ def nTimes(n, f, *args, **kwargs):
     hallo
 
     """
-    for i in xrange(n): f(*args, **kwargs)
+    for i in range(n): f(*args, **kwargs)
 
 
 def timeCall(*funcAndArgs, **kwargs):
@@ -1121,7 +1125,7 @@ __test__['timeCall'] = r"""
 def isString(obj):
     r"""Return `True` iff `obj` is some type of string (i.e. `str` or
     `unicode`)."""
-    return isinstance(obj, basestring)
+    return isinstance(obj, str)
 
 chomp = partial(re.compile(r"\n+$").sub, '')
 chomp.__doc__ =  r"""Discards all trailing newlines in string."""
@@ -1134,7 +1138,7 @@ True
 
 def chompLines(lines):
     r"""Returns a lazy sequence of `lines` sans any trailing newline."""
-    return imap(chomp, lines)
+    return list(map(chomp, lines))
     # faster 2.5 version (not 100% identical, but good enough):
     ## return (L[:-1] if L[-1:] == "\n" else L for L in lines)
 
@@ -1155,11 +1159,11 @@ def replaceStrs(s, *args):
     """
     if args == (): return s
     mapping = dict((frm, to) for frm, to in args)
-    return re.sub("|".join(map(re.escape, mapping.keys())),
+    return re.sub("|".join(map(re.escape, list(mapping.keys()))),
                   lambda match:mapping[match.group(0)], s)
 
 def escape(s):
-    ur"""Backslash escape non-printable non-ascii characters and ``"'\``.
+    r"""Backslash escape non-printable non-ascii characters and ``"'\``.
 
     >>> escape('''a\\string"with'some\tspecial\ncharacters''')
     'a\\\\string"with\\'some\\tspecial\\ncharacters'
@@ -1184,7 +1188,7 @@ def unescape(s):
     >>> unescape(u'ah')
     u'ah'
     """
-    if re.search(r'(?<!\\)\\(\\\\)*[uU]', s) or isinstance(s, unicode):
+    if re.search(r'(?<!\\)\\(\\\\)*[uU]', s) or isinstance(s, str):
         return unescapeUnicode(s)
     else:
         return unescapeAscii(s)
@@ -1218,20 +1222,6 @@ def lineAndColumnAt(s, pos):
         return 1, pos
 
 #_. TERMINAL OUTPUT FUNCTIONS
-
-def prin(*args, **kwargs):
-    r"""Like ``print``, but a function. I.e. prints out all arguments as
-    ``print`` would do. Specify output stream like this::
-
-      print('ERROR', `out="sys.stderr"``).
-
-    """
-    print >> kwargs.get('out',None), " ".join([str(arg) for arg in args])
-__test__['prin'] = r"""
->>> prin(1,2,3,out=None)
-1 2 3
-"""
-
 
 def underline(s, lineC='-'):
     r"""Return `s` + newline + enough '-' (or lineC if specified) to underline it
@@ -1295,11 +1285,11 @@ def __saveVarsHelper(filename, varNamesStr, outOf,extension='.bpickle',**opts):
     filename = os.path.expanduser(filename)
     if outOf is None: outOf = magicGlobals(2)
     if not varNamesStr or not isString(varNamesStr):
-        raise ValueError, "varNamesStr must be a string!"
+        raise ValueError("varNamesStr must be a string!")
     varnames = varNamesStr.split()
     if not splitext(filename)[1]: filename += extension
     if opts.get("overwrite") == 0 and os.path.exists(filename):
-	raise RuntimeError("File already exists")
+        raise RuntimeError("File already exists")
     return filename, varnames, outOf
 
 def saveVars(filename, varNamesStr, outOf=None, **opts):
@@ -1317,12 +1307,12 @@ def saveVars(filename, varNamesStr, outOf=None, **opts):
     """
     filename, varnames, outOf = __saveVarsHelper(
         filename, varNamesStr, outOf, **opts)
-    print "pickling:\n", "\n".join(sorted(varnames))
+    print(("pickling:\n", "\n".join(sorted(varnames))))
     try:
         f = None
-	f = open(filename, "wb")
+        f = open(filename, "wb")
 
-	cPickle.dump(dict(zip(varnames, atIndices(outOf, varnames))),
+        pickle.dump(dict(list(zip(varnames, atIndices(outOf, varnames)))),
                      f, 1) # UGH: cPickle, unlike pickle doesn't accept bin=1
     finally:
         if f: f.close()
@@ -1330,7 +1320,7 @@ def saveVars(filename, varNamesStr, outOf=None, **opts):
 
 #FIXME untested
 def saveDict(filename, d, **kwargs):
-    saveVars(filename, " ".join(d.keys()), outOf=d, **kwargs)
+    saveVars(filename, " ".join(list(d.keys())), outOf=d, **kwargs)
 
 
 def addVars(filename, varNamesStr, outOf=None):
@@ -1339,12 +1329,12 @@ def addVars(filename, varNamesStr, outOf=None):
     f = None
     try:
         f = open(filename, "rb")
-        h = cPickle.load(f)
+        h = pickle.load(f)
         f.close()
 
-        h.update(dict(zip(varnames, atIndices(outOf, varnames))))
+        h.update(dict(list(zip(varnames, atIndices(outOf, varnames)))))
         f = open(filename, "wb")
-        cPickle.dump( h, f , 1 )
+        pickle.dump( h, f , 1 )
     finally:
         if f: f.close()
 
@@ -1356,7 +1346,7 @@ def loadDict(filename):
     f = None
     try:
         f = open(filename, "rb")
-        varH = cPickle.load(f)
+        varH = pickle.load(f)
     finally:
         if f: f.close()
     return varH
@@ -1375,19 +1365,19 @@ def loadVars(filename, ask=True, into=None, only=None):
     filename = os.path.expanduser(filename)
     if into is None: into = magicGlobals()
     varH = loadDict(filename)
-    toUnpickle = only or varH.keys()
-    alreadyDefined = filter(into.has_key, toUnpickle)
+    toUnpickle = only or list(varH.keys())
+    alreadyDefined = list(filter(into.has_key, toUnpickle))
     if alreadyDefined and ask:
-	print "The following vars already exist; overwrite (yes/NO)?\n",\
-	      "\n".join(alreadyDefined)
-	if raw_input() != "yes":
-	    toUnpickle = without(toUnpickle, alreadyDefined)
-    if not toUnpickle:
-	print "nothing to unpickle"
-	return None
-    print "unpickling:\n",\
-	  "\n".join(sorted(toUnpickle))
-    for k in varH.keys():
+        print(("The following vars already exist; overwrite (yes/NO)?\n",\
+	      "\n".join(alreadyDefined)))
+        if eval(input()) != "yes":
+            toUnpickle = without(toUnpickle, alreadyDefined)
+        if not toUnpickle:
+            print("nothing to unpickle")
+        return None
+    print(("unpickling:\n",\
+	  "\n".join(sorted(toUnpickle))))
+    for k in list(varH.keys()):
         if k not in toUnpickle:
             del varH[k]
     into.update(varH)
@@ -1507,8 +1497,8 @@ see `DryRun.__init__` for more details."""
             else:
                 funcName = func.__name__
             return "%s(%s)" % (funcName,
-              ", ".join(map(repr,args) + map(lambda x: "%s=%s" %
-                                             tuple(map(repr,x)), kwargs.items())))
+              ", ".join(list(map(repr,args)) + ["%s=%s" %
+                                             tuple(map(repr,x)) for x in list(kwargs.items())]))
         self.defaultFormatter = defaultFormatter
     def __call__(self, func, *args, **kwargs):
         """Shorcut for self.run."""
@@ -1529,8 +1519,7 @@ see `DryRun.__init__` for more details."""
         """Instead of running function with `*args` and `**kwargs`, just print
            out the function call."""
 
-        print >> self.out, \
-              self.formatterDict.get(func, self.defaultFormatter)(func, *args, **kwargs)
+        print(self.formatterDict.get(func, self.defaultFormatter)(func, *args, **kwargs), file=self.out)
     def wetRun(self, func, *args, **kwargs):
         """Run function with ``*args`` and ``**kwargs``."""
         return func(*args, **kwargs)
@@ -1555,7 +1544,7 @@ def makePrintReturner(pre="", post="" ,out=None):
     """
     def printReturner(arg):
         myArgs = [pre, arg, post]
-        prin(*myArgs, **{'out':out})
+        print(*myArgs, **{'out':out})
         return arg
     return printReturner
 
@@ -1582,15 +1571,15 @@ class ShowWrap(object):
     def __getattribute__(self, name):
         myDict = super(ShowWrap, self).__getattribute__('__dict__')
         realThing = getattr(myDict['module'], name)
-        if not callable(realThing):
+        if not isinstance(realThing, collections.Callable):
             return realThing
         else:
             def show(*x, **y):
-                print >>sys.stderr, "%s%s.%s(%s)" % (
+                print("%s%s.%s(%s)" % (
                     myDict['prefix'],
                     getattr(myDict['module'], '__name__', '?'),
                     name,
-                    ",".join(map(repr,x) + ["%s=%r" % (n, v) for n,v in y.items()]))
+                    ",".join(list(map(repr,x)) + ["%s=%r" % (n, v) for n,v in list(y.items())])), file=sys.stderr)
                 return realThing(*x, **y)
             return show
 
@@ -1604,9 +1593,9 @@ def asVerboseContainer(cont, onGet=None, onSet=None, onDel=None):
 
        >>> l = [1,2,3]
        >>> l = asVerboseContainer(l,
-       ...                onGet=lambda s,k:k==2 and prin('Got two:', k),
-       ...                onSet=lambda s,k,v:k == v and prin('k == v:', k, v),
-       ...                onDel=lambda s,k:k == 1 and prin('Deleting one:', k))
+       ...                onGet=lambda s,k:k==2 and print('Got two:', k),
+       ...                onSet=lambda s,k,v:k == v and print('k == v:', k, v),
+       ...                onDel=lambda s,k:k == 1 and print('Deleting one:', k))
        >>> l
        [1, 2, 3]
        >>> l[1]
@@ -1693,7 +1682,7 @@ class ezstruct(object):
     def __ne__(self, other):
         return not self.__eq__(other)
     def __len__(self):
-        return len([k for k in self.__dict__.iterkeys()
+        return len([k for k in list(self.__dict__.keys())
                     if not (k.startswith('__') or k.endswith('__'))])
     # FIXME rather perverse
     def __getitem__(self, nameOrNames):
@@ -1711,7 +1700,7 @@ class ezstruct(object):
     def __contains__(self, key):
         return key in self.__dict__ and not (key.startswith('__') or key.endswith('__'))
     def __iter__(self):
-        for (k,v) in self.__dict__.iteritems():
+        for (k,v) in list(self.__dict__.items()):
             if not (k.startswith('__') or k.endswith('__')):
                 yield k,v
     def __repr__(self):
@@ -1745,7 +1734,7 @@ def mkRepr(instance, *argls, **kwargs):
     width=79
     maxIndent=15
     minIndent=2
-    args = (map(repr, argls) + ["%s=%r" % (k, v)
+    args = (list(map(repr, argls)) + ["%s=%r" % (k, v)
                                for (k,v) in sorted(kwargs.items())]) or [""]
     if instance is not None:
         start = "%s(" % instance.__class__.__name__
@@ -1753,7 +1742,7 @@ def mkRepr(instance, *argls, **kwargs):
     else:
         start = ""
     if len(start) <= maxIndent and len(start) + len(args[0]) <= width and \
-           max(map(len,args)) <= width: # XXX mag of last condition bit arbitrary
+           max(list(map(len,args))) <= width: # XXX mag of last condition bit arbitrary
         indent = len(start)
         args[0] = start + args[0]
         if sum(map(len, args)) + 2*(len(args) - 1) <= width:
@@ -1853,10 +1842,10 @@ def argmax(iterable, key=None, both=False):
     (2, 5)
     """
     if key is not None:
-        it = imap(key, iterable)
+        it = list(map(key, iterable))
     else:
         it = iter(iterable)
-    score, argmax = reduce(max, izip(it, count()))
+    score, argmax = reduce(max, list(zip(it, count())))
     if both:
         return argmax, score
     return argmax
@@ -1865,10 +1854,10 @@ def argmin(iterable, key=None, both=False):
     """See `argmax`.
     """
     if key is not None:
-        it = imap(key, iterable)
+        it = list(map(key, iterable))
     else:
         it = iter(iterable)
-    score, argmin = reduce(min, izip(it, count()))
+    score, argmin = reduce(min, list(zip(it, count())))
     if both:
         return argmin, score
     return argmin
@@ -1926,7 +1915,7 @@ def mapConcat(func, *iterables):
     >>> mapConcat(lambda x: [x,str(x)], [1,2,3])
     [1, '1', 2, '2', 3, '3']
     """
-    return [e for l in imap(func, *iterables) for e in l]
+    return [e for l in map(func, *iterables) for e in l]
 
 
 
@@ -2039,9 +2028,9 @@ if __name__ in ("__main__", "__IPYTHON_main__"):
             assert out[0] == ''
             assert re.match( 'ls:.*/i-DoNOT___.EXIST:.*No such file or directory.*', out[1])
             assert out[2] == 2, out[2]
-    suite = unittest.TestSuite(map(unittest.makeSuite,
+    suite = unittest.TestSuite(list(map(unittest.makeSuite,
                                    (ProcessTest,
-                                   )))
+                                   ))))
     #suite.debug()
     unittest.TextTestRunner(verbosity=2).run(suite)
 

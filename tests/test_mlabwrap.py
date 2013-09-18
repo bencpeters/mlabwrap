@@ -46,11 +46,11 @@ mlab._dont_proxy['cell'] = False
 # FIXME should do this differentlya
 funnies = without(WHO_AT_STARTUP, ['HOME', 'V', 'WLVERBOSE', 'MLABRAW_ERROR_'])
 if funnies:
-    print >> sys.stderr, "Hmm, got some funny stuff in matlab env: %s" % funnies
+    print("Hmm, got some funny stuff in matlab env: %s" % funnies, file=sys.stderr)
 
 #FIXME both below untested
 def fitString(s, maxCol=79, newlineReplacement="\\n"):
-    if newlineReplacement or isinstance(newlineReplacement, basestring):
+    if newlineReplacement or isinstance(newlineReplacement, str):
         s = s.replace("\n", newlineReplacement)
     if maxCol is not None and len(s) > maxCol:
         s = "%s..." % s[:maxCol-3]
@@ -77,7 +77,7 @@ class NumericTestCase(TestCase):
         else:
             # HACK
             if len(first) == len(second) == 0:
-                return `first` == `second` # deal with empty arrays
+                return repr(first) == repr(second) # deal with empty arrays
             res = ((not testShape or numpy.shape(first) == numpy.shape(second)) and
                    # it is necessary to exclude 0 element arrays, because
 
@@ -91,26 +91,22 @@ class NumericTestCase(TestCase):
                       for arg in args])
     def assertEqual(self, first, second, msg=None):
         if not self._reallyEqual(first, second):
-            raise self.failureException, \
-                  (msg or '%s != %s' % self._smallRepr(first, second))
+            raise self.failureException(msg or '%s != %s' % self._smallRepr(first, second))
 
     assertEqual = failUnlessEqual = assertEqual
     def assertNotEqual(self, first, second, msg=None):
         if self._reallyEqual(first, second):
-            raise self.failureException, \
-                  (msg or '%s == %s' % self._smallRepr(first, second))
+            raise self.failureException(msg or '%s == %s' % self._smallRepr(first, second))
     assertNotEquals = failIfEqual = assertNotEqual
     def assertAlmostEqual(self, first, second, places=7, msg=None):
         if not (numpy.shape(first) == numpy.shape(second) and \
                 self._reallyEqual(numpy.around(second-first, places), 0, testShape=False)):
-            raise self.failureException, \
-                  (msg or '%s != %s within %s places' % self._smallRepr(first,second,places))
+            raise self.failureException(msg or '%s != %s within %s places' % self._smallRepr(first,second,places))
     assertAlmostEquals = failUnlessAlmostEqual = assertAlmostEqual
     def assertNotAlmostEqual(self, first, second, places=7, msg=None):
         if not (numpy.shape(first) == numpy.shape(second) and \
                 not self._reallyEqual(numpy.around(second-first, places), 0, testShape=False)):
-            raise self.failureException, \
-                  (msg or '%s == %s within %s places' % self._smallRepr(first,second,places))
+            raise self.failureException(msg or '%s == %s within %s places' % self._smallRepr(first,second,places))
     failIfAlmostEqual =  assertNotAlmostEquals = assertNotAlmostEqual
 
 
@@ -217,7 +213,7 @@ class mlabwrapTC(NumericTestCase):
         _dont_proxy""".split():
            self.backup[opt] = mlab.__dict__[opt]
         mlab.addpath(os.path.dirname(__file__)) # XXX
-        print "ADDPATHed", os.path.dirname(__file__)
+        print("ADDPATHed", os.path.dirname(__file__))
     def tearDown(self):
         """Reset options."""
         mlab.__dict__.update(self.backup)
@@ -235,7 +231,7 @@ class mlabwrapTC(NumericTestCase):
             mlab._dont_proxy['cell'] = False
     def testXXXSubtler(self):
         """test more subtle stuff. This must come last, hence the XXX"""
-        import os, cPickle
+        import os, pickle
         array = numpy.array
         # simple strings:
         assert (mlab._do("''"), mlab._do("'foobar'")) == ('', 'foobar')
@@ -279,16 +275,16 @@ class mlabwrapTC(NumericTestCase):
         self.assertEqual(mlab.size(sct, [2]), array([[2]]))
         mlab._dont_proxy['cell'] = True
         gc.collect()
-        assert map(degensym_proxy,without(mlab.who(), WHO_AT_STARTUP)) == (
+        assert list(map(degensym_proxy,without(mlab.who(), WHO_AT_STARTUP))) == (
             ['PROXY_VAL__', 'PROXY_VAL__'])
         # test pickling
         pickleFilename = mktemp()
         f = open(pickleFilename, 'wb')
         try:
-            cPickle.dump({'sct': sct, 'bct': bct},f,1)
+            pickle.dump({'sct': sct, 'bct': bct},f,1)
             f.close()
             f = open(pickleFilename, 'rb')
-            namespace = cPickle.load(f)
+            namespace = pickle.load(f)
             f.close()
         finally:
             os.remove(pickleFilename)
@@ -329,7 +325,7 @@ class mlabwrapTC(NumericTestCase):
         assert p.b == '2'
         assert list(p.c.flat) == [4,5]
         # test all combinations of 1D indexing
-        sv = mlab.proxyTest(range(4))
+        sv = mlab.proxyTest(list(range(4)))
         assert sv[0] == 0
         sv[0] = -33
         assert sv[0] == -33
@@ -344,24 +340,24 @@ class mlabwrapTC(NumericTestCase):
         # FIXME this is something to potentially add, but that also raises issues
 ##         assert numpy.ndim(sv) == 2 # FIXME change that to 1?
 ##         assert numpy.shape(sv[:]) == (4,1)  # FIXME change that to 1?
-        assert list(sv[:].flat) == range(4)
+        assert list(sv[:].flat) == list(range(4))
         # more complicated "open-ended" slices aren't supported (yet)
         self.assertEqual(sv[0:], sv[:])
         self.assertEqual(sv[:-1], sv[0:-1])
         self.assertEqual(sv[0:-1:1], sv[:-1])
         self.assertEqual(sv[-4:], sv[:])
         self.assertEqual(sv[-4:-3], sv[0:1])
-        for b in [None] + range(-4,4):
-            for e in  [None] + range(-4,4):
+        for b in [None] + list(range(-4,4)):
+            for e in  [None] + list(range(-4,4)):
                 for s in [None,1]:
-                    assert list(sv[b:e:s].flat) == range(4)[b:e:s], (
+                    assert list(sv[b:e:s].flat) == list(range(4))[b:e:s], (
                         "sv[b:e:s]: %s (b,e,s): %s" % (sv[b:e:s], (b,e,s)))
 
 
         sv[:-1] = -numpy.arange(3)
         assert list(sv[:].flat) ==  [-x for x in range(3)] + [3]
         sv[:] = numpy.arange(4)
-        assert list(sv[:].flat) == range(4)
+        assert list(sv[:].flat) == list(range(4))
         sv[-2:] = numpy.arange(2)+10
         assert list(sv[:].flat) == [0,1,10,11]
 
@@ -412,9 +408,9 @@ class mlabwrapTC(NumericTestCase):
         self.assertEqual(mlab.conj(fa),fa)
         self.assertEqual([[2]],mlab.subsref(fa, mlab.struct('type', '()', 'subs',mlab._do('{{1,2}}'))))
 
-suite = TestSuite(map(unittest.makeSuite,
+suite = TestSuite(list(map(unittest.makeSuite,
                                (mlabwrapTC,
-                                )))
+                                ))))
 unittest.TextTestRunner(verbosity=2).run(suite)
 
 #FIXME strangely enough we can't test this in the function!
