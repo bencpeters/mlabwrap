@@ -183,6 +183,68 @@ static inline bool my_snprintf(char *dst, size_t size, const char *fmt, ...)
 	return n >- 1 && static_cast<size_t>(n) < size;
 }
 
+static int mxArrayDims2PyDims(const mxArray *pArray, npy_intp *py_dims)
+{
+    unsigned int n_dims;
+    const mwSize *mat_dims;
+    mwSize i;
+    pyassert(PyArray_API,
+        "Unable to perform this function without NumPy installed");
+
+    n_dims = mxGetNumberOfDimensions(pArray);
+    if (n_dims > NPY_MAXDIMS) {
+        n_dims = NPY_MAXDIMS;
+    }
+    mat_dims = mxGetDimensions(pArray);
+    for (i = 0; i != n_dims; ++i) {
+        *py_dims++ = mat_dims[i];
+    }
+
+    return n_dims;
+
+    error_return:
+    return 0;
+}
+
+void copy_f_array_to_c_array(char *dest, int nd, npy_intp *dims, 
+    npy_intp *strides, char *src, int elem_size, long num_elems)
+{
+    char *dest_ptrs[nd];
+    long i;
+    int dim_ctr[nd];
+
+    for (i = 0; i != nd; ++i) {
+        dest_ptrs[i] = dest;
+        dim_ctr[i] = 0;
+    }
+
+    printf("Going to copy %ld elements\n", num_elems);
+    for (i = 0; i != num_elems; ++i) {
+        memcpy(dest_ptrs[0], src, elem_size);
+        src += elem_size;
+
+        //roll over dimension tracker
+        int j = 0;
+        int cont_roll;
+        do {
+            printf("Copying element %ld, in do-while loop, with j = %d\n", i, j);
+            dim_ctr[j]++;
+            dest_ptrs[j] += strides[j];
+            if (j > 0) {
+                dest_ptrs[j-1] = dest_ptrs[j];    
+            }
+
+            if (dim_ctr[j] == dims[j]) {
+                dim_ctr[j] = 0;
+                cont_roll = 1;
+            } else {
+                cont_roll = 0;
+            }
+            ++j;
+        } while (cont_roll && j < nd);
+    }
+}
+
 // FIXME: add string array support
 static PyUnicodeObject *mx2char(const mxArray *pArray)
 {
@@ -209,12 +271,39 @@ static PyUnicodeObject *mx2char(const mxArray *pArray)
 	error_return: return NULL;
 }
 
+static PyArrayObject *mx2logical(const mxArray *pArray)
+{
+    npy_intp py_dims[NPY_MAXDIMS];
+    PyArrayObject *ret;
+    int n_dims = mxArrayDims2PyDims(pArray, py_dims);
+
+    ret = (PyArrayObject *) PyArray_SimpleNew(n_dims, py_dims, NPY_BOOL);
+
+    copy_f_array_to_c_array(ret->data, ret->nd, ret->dimensions, ret->strides,
+        (char *)mxGetData(pArray), mxGetElementSize(pArray), PyArray_SIZE(ret));
+
+    return ret;
+}
+
+static PyArrayObject *mx2numeric2(const mxArray *pArray)
+{
+    npy_intp py_dims[NPY_MAXDIMS];
+    PyArrayObject *ret;
+    int n_dims = mxArrayDims2PyDims(pArray, py_dims);
+
+    ret = (PyArrayObject *) PyArray_SimpleNew(n_dims, py_dims, NPY_DOUBLE);
+
+    copy_f_array_to_c_array(ret->data, ret->nd, ret->dimensions, ret->strides,
+        (char *)mxGetData(pArray), mxGetElementSize(pArray), PyArray_SIZE(ret));
+
+    return ret;
+}
 
 static PyArrayObject *mx2numeric(const mxArray *pArray)
 {
   //current function returns PyArrayObject in c order currently
   mwSize nd;
-  npy_intp  pydims[NPY_MAXDIMS];
+  npy_intp pydims[NPY_MAXDIMS];
   PyArrayObject *lRetval = NULL,*t=NULL;
   const double *lPR;
   const double *lPI;
@@ -769,6 +858,8 @@ PyObject * mlabraw_get(PyObject *, PyObject *args)
     lDest = (PyObject *)mx2char(lArray);
   } else if (mxIsDouble(lArray) and not mxIsSparse(lArray)) {
     lDest = (PyObject *)mx2numeric(lArray);
+  } else if (mxIsLogical(lArray)) {
+    lDest = (PyObject *)mx2logical(lArray);
   } else {                      // FIXME structs, cells and non-double arrays
     PyErr_SetString(PyExc_TypeError, "Only strings and non-sparse numeric arrays are supported.");
   }
