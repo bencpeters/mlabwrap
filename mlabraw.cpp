@@ -245,30 +245,49 @@ void copy_f_array_to_c_array(char *dest, int nd, npy_intp *dims,
     }
 }
 
-// FIXME: add string array support
-static PyUnicodeObject *mx2char(const mxArray *pArray)
+static PyObject *mx2char(const mxArray *pArray)
 {
-  size_t buflen;
-  char *buf;
-  PyUnicodeObject *lRetval;
-  if (mxGetM(pArray) > 1) {
-    PyErr_SetString(mlabraw_error, "Only 1 Dimensional strings are currently supported");
-    return NULL;
-  }
-  buflen = mxGetN(pArray) + 1;
-  buf = (char *)mxCalloc(buflen, sizeof(char));
-  pyassert(buf, "Out of MATLAB(TM) memory");
+    size_t buflen;
+    char *buf;
+    int rows = mxGetM(pArray);
+    int i;
+    PyObject *lRetval = NULL;
 
-  if (mxGetString(pArray, buf, buflen)) {
-    PyErr_SetString(mlabraw_error, "Unable to extract MATLAB(TM) string");
+    buflen = mxGetN(pArray);
+    buf = (char *)mxCalloc(buflen, sizeof(mxChar));
+    pyassert(buf, "Out of MATLAB(TM) memory");
+
+    if (rows > 1) {
+        lRetval = PyList_New(0);
+        pyassert(lRetval, "Error creating new list");
+    }
+
+    for (i = 0; i < rows; ++i) {
+        char *buf_ptr = buf;
+        char *src_ptr = ((char *)mxGetData(pArray)) + i*sizeof(mxChar);
+        unsigned int j;
+        for (j = 0; j != buflen; ++j) {
+            memcpy(buf_ptr, src_ptr, sizeof(mxChar));
+            buf_ptr += sizeof(mxChar);
+            src_ptr += rows*sizeof(mxChar);
+        }
+
+        if (rows > 1) {
+            pyassert(PyList_Append(lRetval, PyUnicode_FromKindAndData(
+                PyUnicode_2BYTE_KIND, buf, buflen)) == 0,
+                "Problem with append");
+        } else {
+            lRetval = (PyObject *) PyUnicode_FromKindAndData(
+                PyUnicode_2BYTE_KIND, buf, buflen);
+        }
+    }
+
     mxFree(buf);
-    return NULL;
-  }
+    return lRetval;
 
-  lRetval = (PyUnicodeObject *)PyUnicode_FromString(buf);
-  mxFree(buf);
-  return lRetval;
-	error_return: return NULL;
+    error_return: 
+        mxFree(buf);
+        return NULL;
 }
 
 static PyArrayObject *mx2array(const mxArray *pArray)
