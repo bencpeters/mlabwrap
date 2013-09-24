@@ -218,7 +218,6 @@ void copy_f_array_to_c_array(char *dest, int nd, npy_intp *dims,
         dim_ctr[i] = 0;
     }
 
-    printf("Going to copy %ld elements\n", num_elems);
     for (i = 0; i != num_elems; ++i) {
         memcpy(dest_ptrs[0], src, elem_size);
         src += elem_size;
@@ -227,7 +226,6 @@ void copy_f_array_to_c_array(char *dest, int nd, npy_intp *dims,
         int j = 0;
         int cont_roll;
         do {
-            printf("Copying element %ld, in do-while loop, with j = %d\n", i, j);
             dim_ctr[j]++;
             dest_ptrs[j] += strides[j];
             if (j > 0) {
