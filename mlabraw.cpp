@@ -271,89 +271,58 @@ static PyUnicodeObject *mx2char(const mxArray *pArray)
 	error_return: return NULL;
 }
 
-static PyArrayObject *mx2logical(const mxArray *pArray)
+static PyArrayObject *mx2array(const mxArray *pArray)
 {
     npy_intp py_dims[NPY_MAXDIMS];
     PyArrayObject *ret;
     int n_dims = mxArrayDims2PyDims(pArray, py_dims);
+    int py_array_type = NPY_NOTYPE;
 
-    ret = (PyArrayObject *) PyArray_SimpleNew(n_dims, py_dims, NPY_BOOL);
+    if (mxIsSparse(pArray)) {
+        //TODO: add sparse array support
+        pyassert(PyExc_TypeError, "Sparse arrays are not supported right now, sorry.");
+    }
+
+    if (mxIsComplex(pArray)) {
+        //TODO: add complex number support
+        pyassert(PyExc_TypeError, "Complex number support is not available right now, sorry");
+    }
+
+    if (mxIsDouble(pArray)) {
+        py_array_type = NPY_DOUBLE;
+    } else if (mxIsSingle(pArray)) {
+        py_array_type = NPY_FLOAT;
+    } else if (mxIsInt64(pArray)) {
+        py_array_type = NPY_INT64;
+    } else if (mxIsUint64(pArray)) {
+        py_array_type = NPY_UINT64;
+    } else if (mxIsInt32(pArray)) {
+        py_array_type = NPY_INT32;
+    } else if (mxIsUint32(pArray)) {
+        py_array_type = NPY_UINT32;
+    } else if (mxIsInt16(pArray)) {
+        py_array_type = NPY_INT16;
+    } else if (mxIsUint16(pArray)) {
+        py_array_type = NPY_UINT16;
+    } else if (mxIsInt8(pArray)) {
+        py_array_type = NPY_INT8;
+    } else if (mxIsUint8(pArray)) {
+        py_array_type = NPY_UINT8;
+    } else if (mxIsLogical(pArray)) {
+        py_array_type = NPY_BOOL;
+    } else {
+        pyassert(PyExc_TypeError, "Array type not recognized");    
+    }
+
+    ret = (PyArrayObject *) PyArray_SimpleNew(n_dims, py_dims, py_array_type);
 
     copy_f_array_to_c_array(ret->data, ret->nd, ret->dimensions, ret->strides,
         (char *)mxGetData(pArray), mxGetElementSize(pArray), PyArray_SIZE(ret));
 
     return ret;
-}
 
-static PyArrayObject *mx2numeric2(const mxArray *pArray)
-{
-    npy_intp py_dims[NPY_MAXDIMS];
-    PyArrayObject *ret;
-    int n_dims = mxArrayDims2PyDims(pArray, py_dims);
-
-    ret = (PyArrayObject *) PyArray_SimpleNew(n_dims, py_dims, NPY_DOUBLE);
-
-    copy_f_array_to_c_array(ret->data, ret->nd, ret->dimensions, ret->strides,
-        (char *)mxGetData(pArray), mxGetElementSize(pArray), PyArray_SIZE(ret));
-
-    return ret;
-}
-
-static PyArrayObject *mx2numeric(const mxArray *pArray)
-{
-  //current function returns PyArrayObject in c order currently
-  mwSize nd;
-  npy_intp pydims[NPY_MAXDIMS];
-  PyArrayObject *lRetval = NULL,*t=NULL;
-  const double *lPR;
-  const double *lPI;
-  pyassert(PyArray_API,
-           "Unable to perform this function without NumPy installed");
-
-  nd = mxGetNumberOfDimensions(pArray);
-  {
-    const mwSize *dims;
-    dims = mxGetDimensions(pArray);
-    for (mwSize i=0; i != nd; i++){
-        pydims[i] = static_cast<npy_intp>(dims[i]);
-    }
-  }
- //this function creates a fortran array
-  t = (PyArrayObject *)
-    PyArray_New(&PyArray_Type,static_cast<npy_intp>(nd), pydims,
-                mxIsComplex(pArray) ? PyArray_CDOUBLE : PyArray_DOUBLE,
-                NULL, // strides
-                NULL, // data
-                0,    //(ignored itemsize),
-                NPY_F_CONTIGUOUS, 
-                NULL); //  obj
-  if (t == NULL) return NULL;
-  
-  lPR  = mxGetPr(pArray);
-  if (mxIsComplex(pArray)) {
-    double *lDst = (double *)PyArray_DATA(t);
-    // AWMS unsigned int almost certainly can overflow on some platforms!
-    npy_uintp numberOfElements = PyArray_SIZE(t);
-    lPI = mxGetPi(pArray);
-    for (mwIndex i = 0; i != numberOfElements; i++) {
-      *lDst++ = *lPR++;
-      *lDst++ = *lPI++;
-    }
-  }
-  else {
-    double *lDst = (double *)PyArray_DATA(t);
-    npy_uintp numberOfElements = PyArray_SIZE(t);
-    for (mwIndex i = 0; i != numberOfElements; i++) {
-      *lDst++ = *lPR++;
-    }
-  }
-  
-  lRetval = (PyArrayObject *)PyArray_FromArray(t,NULL,NPY_C_CONTIGUOUS|NPY_ALIGNED|NPY_WRITEABLE);
-  Py_DECREF(t);
-  
-  return lRetval;
-  error_return:
-  return NULL;
+    error_return: 
+        return NULL;
 }
 
 //FIXME check complex case
@@ -855,12 +824,10 @@ PyObject * mlabraw_get(PyObject *, PyObject *args)
   }
 
   if (mxIsChar(lArray)) {
-    lDest = (PyObject *)mx2char(lArray);
-  } else if (mxIsDouble(lArray) and not mxIsSparse(lArray)) {
-    lDest = (PyObject *)mx2numeric(lArray);
-  } else if (mxIsLogical(lArray)) {
-    lDest = (PyObject *)mx2logical(lArray);
-  } else {                      // FIXME structs, cells and non-double arrays
+    lDest = mx2char(lArray);
+  } else if (mxIsLogical(lArray) || mxIsNumeric(lArray)) {
+    lDest = (PyObject *)mx2array(lArray);
+  } else {
     PyErr_SetString(PyExc_TypeError, "Only strings and non-sparse numeric arrays are supported.");
   }
   mxDestroyArray(lArray);
